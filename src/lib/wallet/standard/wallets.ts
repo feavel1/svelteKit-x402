@@ -1,12 +1,10 @@
 import { writable, derived, get } from 'svelte/store';
 import type { Wallet } from '@wallet-standard/base';
 import { getWallets } from '@wallet-standard/app';
-import { StandardConnect } from '@wallet-standard/features';
-import type { StandardConnectFeature } from '@wallet-standard/features';
+import type { UiWallet } from '@wallet-standard/ui';
+import { StandardConnect, type StandardConnectFeature } from '@wallet-standard/features';
 import { getOrCreateUiWalletForStandardWallet_DO_NOT_USE_OR_YOU_WILL_BE_FIRED } from '@wallet-standard/ui-registry';
 import { browser } from '$app/environment';
-import { connect } from 'solana-kite';
-import type { UiWallet } from '@wallet-standard/ui';
 
 interface WalletState {
 	connected: boolean;
@@ -139,11 +137,3 @@ export const walletAddress = derived(
 
 // Derived store for available wallets
 export const availableWallets = derived(wallet, () => wallet.getAvailableWallets());
-
-// Derived store for the connection
-export const connection = derived(wallet, ($wallet) => {
-	if (!$wallet.connected || !$wallet.UiWallet) {
-		return null;
-	}
-	return connect('devnet');
-});
