@@ -48,10 +48,15 @@
 		"wrangler": "^4.81.0"
 	},
 	"dependencies": {
+		"@solana/kit": "^6.8.0",
+		"@solana/wallet-account-signer": "^6.8.0",
 		"@wallet-standard/app": "^1.1.0",
 		"@wallet-standard/base": "^1.1.0",
 		"@wallet-standard/features": "^1.1.0",
 		"@wallet-standard/ui": "^1.0.1",
-		"@wallet-standard/ui-registry": "^1.0.1"
+		"@wallet-standard/ui-registry": "^1.0.1",
+		"@x402/fetch": "^2.10.0",
+		"@x402/svm": "^2.10.0",
+		"x402-sveltekit": "^0.1.8"
 	}
 }
