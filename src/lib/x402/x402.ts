@@ -7,7 +7,7 @@ import { ExactSvmScheme } from '@x402/svm/exact/client';
 import { createSignerFromWalletAccount } from '@solana/wallet-account-signer';
 
 function createX402Store() {
-	const { subscribe, set, update } = writable<X402State>({
+	const { subscribe, set } = writable<X402State>({
 		loading: false,
 		status: null,
 		error: null
@@ -16,23 +16,11 @@ function createX402Store() {
 	return {
 		subscribe,
 
-		async fetch(url: string, options: RequestInit = {}): Promise<Response> {
-			set({ loading: true, status: null, error: null });
-
-			// Initial request
-			const response = await fetch(url, options);
-
-			console.log('Response from server: ' + JSON.stringify(await response.json()));
-
-			if (response.status !== 402) {
-				set({ loading: false, status: 'Success != 402', error: null });
-				return response;
-			}
-			update((s) => ({ ...s, status: 'Payment required' }));
+		async fetch(url: string): Promise<Response> {
+			set({ loading: true, status: 'Payment required~', error: null });
 
 			try {
 				const $wallet = get(wallet);
-
 				if (!$wallet.connected || !$wallet.UiWallet) {
 					throw new Error('Wallet not connected, connect wallet and retry');
 				}
