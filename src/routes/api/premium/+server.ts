@@ -1,108 +1,110 @@
 import { json } from '@sveltejs/kit';
-import { x402ResourceServer, HTTPFacilitatorClient, type ResourceConfig } from '@x402/core/server';
+import { x402ResourceServer, HTTPFacilitatorClient } from '@x402/core/server';
 import { ExactSvmScheme } from '@x402/svm/exact/server';
-import type { PaymentRequired, PaymentRequirements } from '@x402/core/types';
-import { TREASURY_ADDRESS, FACILITATOR_URL } from '$env/static/private';
 import { encodePaymentRequiredHeader } from '@x402/core/http';
+import { TREASURY_ADDRESS, FACILITATOR_URL } from '$env/static/private';
 
-const svmAddress = TREASURY_ADDRESS;
-const facilitatorUrl = FACILITATOR_URL;
-
-if (!svmAddress) {
-	console.error('❌ SVM_ADDRESS environment variable is required');
+// Validate env vars
+if (!TREASURY_ADDRESS || !FACILITATOR_URL) {
+	console.error('❌ Missing required env: TREASURY_ADDRESS, FACILITATOR_URL');
 	process.exit(1);
 }
 
-if (!facilitatorUrl) {
-	console.error('❌ FACILITATOR_URL environment variable is required');
-	process.exit(1);
-}
-
-// Create facilitator client and resource server
-const facilitatorClient = new HTTPFacilitatorClient({ url: facilitatorUrl });
+// Setup payment server
+const facilitatorClient = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
 const resourceServer = new x402ResourceServer(facilitatorClient).register(
 	'solana:*',
 	new ExactSvmScheme()
 );
-
 await resourceServer.initialize();
 
-// console.log(resourceServer.getSupportedKind(2, 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1', 'exact'));
-
-// Define route configurations (will be converted to PaymentRequirements at runtime)
-interface RoutePaymentConfig extends ResourceConfig {
-	description: string;
-	mimeType: string;
+// Build payment requirements once
+const paymentRequirements = await resourceServer.buildPaymentRequirements({
+	scheme: 'exact',
+	price: '$0.001',
+	network: 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1',
+	payTo: TREASURY_ADDRESS
+});
+if (paymentRequirements.length === 0) {
+	console.error('❌ Failed to build payment requirements');
+	process.exit(1);
 }
-const routeConfigs: Record<string, RoutePaymentConfig> = {
-	'GET /api/premium': {
-		scheme: 'exact',
-		price: '$0.001',
-		network: 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1',
-		payTo: svmAddress,
-		description: 'Some premium data',
-		mimeType: 'application/json'
-	}
-};
 
-// Cache for built payment requirements
-const routeRequirements: Record<string, PaymentRequirements> = {};
-
-export async function GET({ request: req }) {
-	await resourceServer.initialize();
-
-	const routeKey = `GET /api/premium`;
-	const routeConfig = routeConfigs[routeKey];
-
-	// console.log(`📥 Request received: ${JSON.stringify(routeConfig)}`);
-
-	// Build PaymentRequirements from config (cached for efficiency)
-	if (!routeRequirements[routeKey]) {
-		const builtRequirements = await resourceServer.buildPaymentRequirements(routeConfig);
-		if (builtRequirements.length === 0) {
-			console.error('❌ Failed to build payment requirements');
-			return json({
-				message: 'Server configuration error',
-				status: '500'
-			});
-		}
-		routeRequirements[routeKey] = builtRequirements[0];
-	}
-	const requirements = routeRequirements[routeKey];
-
-	console.log('Requirements: ' + JSON.stringify(requirements));
-
-	const paymentHeader = (req.headers.get('payment-signature') || req.headers.get('x-payment')) as
-		| string
-		| undefined;
+export async function GET({ request }) {
+	const paymentHeader =
+		request.headers.get('payment-signature') || request.headers.get('x-payment');
 
 	if (!paymentHeader) {
-		// Step 2: Return 402 with payment requirements
-
-		const response: PaymentRequired = {
+		const response = {
 			x402Version: 2,
-			error: 'Failed building required response',
+			error: 'Payment required',
 			resource: {
-				url: req.url,
-				description: routeConfig.description,
-				mimeType: routeConfig.mimeType
+				url: request.url,
+				description: 'Some premium data',
+				mimeType: 'application/json'
 			},
-			accepts: [requirements]
+			accepts: [paymentRequirements[0]]
 		};
-
-		// Use base64 encoding for the PAYMENT-REQUIRED header (v2 protocol)
-		const requirementsHeader = encodePaymentRequiredHeader(response);
-
-		// console.log('🥹 Payment requirementsHeader: ' + requirementsHeader);
-
 		return json(
-			{ error: 'Invalid payment' },
+			{ error: 'Payment required' },
 			{
 				status: 402,
-				headers: { 'PAYMENT-REQUIRED': requirementsHeader }
+				headers: { 'PAYMENT-REQUIRED': encodePaymentRequiredHeader(response) }
 			}
 		);
 	}
+	try {
+		// Step 3: Verify payment
+		console.log('🔐 Payment provided, verifying with facilitator...');
+
+		const paymentPayload = JSON.parse(Buffer.from(paymentHeader, 'base64').toString('utf-8'));
+		const verifyResult = await resourceServer.verifyPayment(paymentPayload, paymentRequirements[0]);
+
+		if (!verifyResult.isValid) {
+			console.log(`❌ Payment verification failed: ${verifyResult.invalidReason}`);
+			return json(
+				{
+					error: 'Invalid Payment',
+					reason: verifyResult.invalidReason
+				},
+				{
+					status: 402
+				}
+			);
+		}
+		console.log('✅ Payment verified successfully');
+		try {
+			const settleResult = await resourceServer.settlePayment(
+				paymentPayload,
+				paymentRequirements[0]
+			);
+			console.log(`✅ Payment settled: ${settleResult.transaction}`);
+			const settlementHeader = Buffer.from(JSON.stringify(settleResult)).toString('base64');
+			return json(
+				{
+					message: 'Premium content unlocked!',
+					timestamp: new Date().toISOString()
+				},
+				{
+					headers: { 'PAYMENT-RESPONSE': settlementHeader }
+				}
+			);
+		} catch (error) {
+			console.error(`❌ Settlement failed: ${error}`);
+		}
+	} catch (error) {
+		console.error(`❌ Payment processing error: ${error}`);
+		return json(
+			{
+				error: 'Payment Processing Error',
+				message: error instanceof Error ? error.message : 'Unknown error'
+			},
+			{
+				status: 500
+			}
+		);
+	}
+	console.log('💰 Settling payment on-chain...');
 
 	return json({
 		message: 'Premium content unlocked!',
