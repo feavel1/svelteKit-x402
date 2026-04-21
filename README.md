@@ -6,7 +6,7 @@ Wallet dependencies used in $lib/wallet/standard and wallet transactionsigner (@
 bun i @wallet-standard/base @wallet-standard/app @wallet-standard/features @wallet-standard/ui-registry @wallet-standard/ui @solana/wallet-account-signer
 ```
 
-x402 client dependencies used in $lib/x402/x402.ts
+x402 client dependencies used in $lib/x402/x402.ts and /api/premium/+server.ts
 
 ```bash
 bun i @x402/core @x402/fetch @x402/svm
