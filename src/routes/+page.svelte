@@ -11,8 +11,8 @@
 			const response = await x402.fetch('/api/premium');
 			content = await response.json();
 		} catch (err) {
-			// console.log(err);
 			// Error is already in the store
+			console.log(err);
 		}
 	}
 </script>
