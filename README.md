@@ -71,7 +71,7 @@ export async function GET({ request }) {
 }
 ```
 
-## x402.ts 
+## x402.ts
 
 // simple client svelte store to have some frontend feedback
 
