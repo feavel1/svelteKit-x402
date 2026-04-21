@@ -138,7 +138,7 @@ export const x402 = createX402Store();
 
 ## Future development plans and use cases
 
-1. Maybe add transaction cancell?
+1. Maybe add transaction cancel?
 2. Add a db to record purchased content
 3. Explore extentions integration
 4. Let the user pay for some content, do some db operation and return `Success!`
