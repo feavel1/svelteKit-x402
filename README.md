@@ -1,160 +1,74 @@
-# SvelteKit x402 using kit Client/Server Demo
+# 💸 SvelteKit + x402: Premium Content with Wallet Payments
 
-Not using any middleware or hooks to have full control over the default x402 procedure
+> *Pay-per-access protected routes on Solana, using `wallet-standard` and the x402 protocol. No middleware – full control.*
 
-## +server.ts
+![SvelteKit](https://img.shields.io/badge/SvelteKit-FF3E00?logo=svelte&logoColor=white)
+![Solana](https://img.shields.io/badge/Solana-9945FF?logo=solana&logoColor=white)
+![x402](https://img.shields.io/badge/x402-payments-blue)
 
-```ts
-import { json } from '@sveltejs/kit';
-import { x402ResourceServer, HTTPFacilitatorClient } from '@x402/core/server';
-import { ExactSvmScheme } from '@x402/svm/exact/server';
-import { encodePaymentRequiredHeader } from '@x402/core/http';
-import { TREASURY_ADDRESS, FACILITATOR_URL } from '$env/static/private';
+---
 
-if (!TREASURY_ADDRESS || !FACILITATOR_URL)
-	throw new Error('Missing TREASURY_ADDRESS or FACILITATOR_URL');
+## 🚀 What it does
 
-const facilitatorClient = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
-const resourceServer = new x402ResourceServer(facilitatorClient).register(
-	'solana:*',
-	new ExactSvmScheme()
-);
-await resourceServer.initialize();
+- Protects an API endpoint (`/api/premium`) with **HTTP 402 Payment Required**  
+- Users connect their **Solana wallet** (via `wallet-standard`)  
+- Client automatically pays **exactly $1** (or equivalent SOL)  
+- Server verifies payment, settles, and unlocks premium content  
 
-const paymentReq = (
-	await resourceServer.buildPaymentRequirements({
-		scheme: 'exact',
-		price: '$1',
-		network: 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1',
-		payTo: TREASURY_ADDRESS
-	})
-)[0];
+---
 
-if (!paymentReq) throw new Error('Failed to build payment requirements');
+## 🧱 How it works (simplified)
 
-export async function GET({ request }) {
-	const rawPayment = request.headers.get('payment-signature') || request.headers.get('x-payment');
-	if (!rawPayment) {
-		return json(
-			{ error: 'Payment required' },
-			{
-				status: 402,
-				headers: {
-					'PAYMENT-REQUIRED': encodePaymentRequiredHeader({
-						x402Version: 2,
-						error: 'Payment required',
-						resource: {
-							url: request.url,
-							description: 'Some premium data',
-							mimeType: 'application/json'
-						},
-						accepts: [paymentReq]
-					})
-				}
-			}
-		);
-	}
+### 1. Server (`api/premium/+server.ts`)
 
-	const paymentPayload = JSON.parse(Buffer.from(rawPayment, 'base64').toString());
-	const { isValid, invalidReason } = await resourceServer.verifyPayment(paymentPayload, paymentReq);
-	if (!isValid) {
-		return json({ error: 'Invalid Payment', reason: invalidReason }, { status: 402 });
-	}
+- Sets payment requirement: `price: "$1"`, treasury address, network  
+- Returns `402` + `PAYMENT-REQUIRED` header if no payment  
+- Verifies incoming payment signature, settles on-chain  
+- Responds with premium data + `PAYMENT-RESPONSE` header  
 
-	const settleResult = await resourceServer.settlePayment(paymentPayload, paymentReq);
-	return json(
-		{ message: 'Premium content unlocked!', timestamp: new Date().toISOString() },
-		{
-			headers: { 'PAYMENT-RESPONSE': Buffer.from(JSON.stringify(settleResult)).toString('base64') }
-		}
-	);
-}
-```
+### 2. Client store (`x402.ts`)
 
-## x402.ts
+- Svelte store that wraps `fetch`  
+- Uses connected wallet to sign payment  
+- Handles the x402 flow automatically (retry with payment)  
 
-// simple client svelte store to have some frontend feedback
+### 3. Wallet integration
 
-```ts
-import type { X402State } from './types.js';
-import { writable, get } from 'svelte/store';
-import { wallet } from '$lib/wallet/standard';
-import { x402Client } from '@x402/core/client';
-import { wrapFetchWithPayment } from '@x402/fetch';
-import { ExactSvmScheme } from '@x402/svm/exact/client';
-import { createSignerFromWalletAccount } from '@solana/wallet-account-signer';
+- `$lib/wallet/standard` – standard wallet adapter  
+- `@solana/wallet-account-signer` – turns wallet account into a signer for SVM  
 
-function createX402Store() {
-	const { subscribe, set } = writable<X402State>({
-		loading: false,
-		status: null,
-		error: null
-	});
+---
 
-	return {
-		subscribe,
-		async fetch(url: string): Promise<Response> {
-			set({ loading: true, status: 'Payment required~', error: null });
+## 📦 Dependencies
 
-			try {
-				const $wallet = get(wallet);
-				if (!$wallet.connected || !$wallet.UiWallet) {
-					throw new Error('Wallet not connected, connect wallet and retry');
-				}
-				const walletAccount = $wallet.UiWallet.accounts[0];
-
-				// Create x402 client and register SVM scheme
-				const client = new x402Client();
-				const svmSigner = createSignerFromWalletAccount(walletAccount, 'solana:devnet');
-
-				client.register('solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1', new ExactSvmScheme(svmSigner));
-
-				// Wrap fetch with payment handling
-				const fetchWithPayment = wrapFetchWithPayment(fetch, client);
-
-				// Make request - payment is handled automatically
-				const newresponse = await fetchWithPayment(url);
-
-				const data = await newresponse.json();
-				console.log('Response:', data);
-
-				set({ loading: false, status: 'Success!', error: null });
-				return newresponse;
-			} catch (err) {
-				console.log(err);
-				const error = (err as Error).message;
-				set({ loading: false, status: null, error });
-				throw err;
-			}
-		},
-		reset() {
-			set({ loading: false, status: null, error: null });
-		}
-	};
-}
-
-export const x402 = createX402Store();
-```
-
-## Future development plans and use cases
-
-1. Maybe add transaction cancel?
-2. Add a db to record purchased content
-3. Explore extentions integration
-4. Let the user pay for some content, do some db operation and return `Success!`
-
-Use full link: [Solana get started with 402](https://solana.com/developers/guides/getstarted/intro-to-x402)
-
-Wallet dependencies used in $lib/wallet/standard and wallet transactionsigner (@solana/wallet-account-signer)
+| Package | Purpose |
+|---------|---------|
+| `@x402/core`, `@x402/fetch`, `@x402/svm` | x402 client/server logic |
+| `@wallet-standard/*` | Wallet connection & UI |
+| `@solana/wallet-account-signer` | Signer for SVM scheme |
 
 ```bash
+# Install everything
 bun i @wallet-standard/base @wallet-standard/app @wallet-standard/features @wallet-standard/ui-registry @wallet-standard/ui @solana/wallet-account-signer
-```
-
-x402 client dependencies used in $lib/x402/x402.ts and /api/premium/+server.ts
-
-```bash
 bun i @x402/core @x402/fetch @x402/svm
 ```
 
-#svelte #solana #wallet-standard #x402 #server/client
+---
+
+## 🔮 Future plans
+
+- [ ] Transaction cancel / refund  
+- [ ] Database to track purchased content  
+- [ ] Browser extension integration  
+- [ ] Pay → DB update → return success  
+
+---
+
+## 📚 Learn more
+
+[Solana x402 guide →](https://solana.com/developers/guides/getstarted/intro-to-x402)
+
+---
+
+Made with ☕ and a bit of frustration (but it works).  
+\#svelte \#solana \#wallet-standard \#x402
